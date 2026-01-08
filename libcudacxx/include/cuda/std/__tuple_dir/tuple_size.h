@@ -64,6 +64,12 @@ template <class... _Tp>
 struct _CCCL_TYPE_VISIBILITY_DEFAULT tuple_size<tuple<_Tp...>> : public integral_constant<size_t, sizeof...(_Tp)>
 {};
 
+#if _CCCL_HAS_HOST_STD_LIB()
+template <class... _Tp>
+struct _CCCL_TYPE_VISIBILITY_DEFAULT tuple_size<::std::tuple<_Tp...>> : public integral_constant<size_t, sizeof...(_Tp)>
+{};
+#endif // _CCCL_HAS_HOST_STD_LIB()
+
 template <class... _Tp>
 struct _CCCL_TYPE_VISIBILITY_DEFAULT
 tuple_size<__tuple_types<_Tp...>> : public integral_constant<size_t, sizeof...(_Tp)>

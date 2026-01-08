@@ -100,6 +100,16 @@ template <size_t _Index, class _Tp>
   return __get_complex_impl<_Tp>::template get<_Index>(::cuda::std::move(__z));
 }
 
+#if _CCCL_HAS_HOST_STD_LIB()
+template <class _Tp>
+struct tuple_size<::std::complex<_Tp>> : ::cuda::std::integral_constant<size_t, 2>
+{};
+
+template <size_t _Index, class _Tp>
+  struct tuple_element<_Index, ::std::complex<_Tp>> : ::cuda::std::enable_if < _Index<2, _Tp>
+{};
+#endif // _CCCL_HAS_HOST_STD_LIB()
+
 _CCCL_END_NAMESPACE_CUDA_STD
 
 #include <cuda/std/__cccl/epilogue.h>

@@ -24,6 +24,19 @@
 
 #include <cuda/std/__cccl/prologue.h>
 
+// std:: forward declarations
+
+#if _CCCL_HAS_HOST_STD_LIB()
+_CCCL_BEGIN_NAMESPACE_STD
+
+template <class _Tp, size_t _Size>
+struct array;
+
+_CCCL_END_NAMESPACE_STD
+#endif // _CCCL_HAS_HOST_STD_LIB()
+
+// ::cuda::std:: forward declaration
+
 _CCCL_BEGIN_NAMESPACE_CUDA_STD
 
 template <class _Tp, size_t _Size>

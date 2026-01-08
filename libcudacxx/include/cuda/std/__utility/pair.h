@@ -653,6 +653,30 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT tuple_element<1, pair<_T1, _T2>>
   using type _CCCL_NODEBUG_ALIAS = _T2;
 };
 
+#if _CCCL_HAS_HOST_STD_LIB()
+template <class _T1, class _T2>
+struct _CCCL_TYPE_VISIBILITY_DEFAULT tuple_size<::std::pair<_T1, _T2>> : public integral_constant<size_t, 2>
+{};
+
+template <size_t _Ip, class _T1, class _T2>
+struct _CCCL_TYPE_VISIBILITY_DEFAULT tuple_element<_Ip, ::std::pair<_T1, _T2>>
+{
+  static_assert(_Ip < 2, "Index out of bounds in std::tuple_element<std::pair<T1, T2>>");
+};
+
+template <class _T1, class _T2>
+struct _CCCL_TYPE_VISIBILITY_DEFAULT tuple_element<0, ::std::pair<_T1, _T2>>
+{
+  using type _CCCL_NODEBUG_ALIAS = _T1;
+};
+
+template <class _T1, class _T2>
+struct _CCCL_TYPE_VISIBILITY_DEFAULT tuple_element<1, ::std::pair<_T1, _T2>>
+{
+  using type _CCCL_NODEBUG_ALIAS = _T2;
+};
+#endif // _CCCL_HAS_HOST_STD_LIB()
+
 template <size_t _Ip>
 struct __get_pair;
 
