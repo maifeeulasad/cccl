@@ -12,14 +12,14 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/device/dispatch/kernels/warpspeed/SpecialRegisters.cuh>
-#include <cub/device/dispatch/kernels/warpspeed/squad/SquadDesc.h>
+#include <cub/detail/warpspeed/special_registers.cuh>
+#include <cub/detail/warpspeed/squad/squad_desc.h>
 
 #include <cuda/__ptx/instructions/elect_sync.h>
 
 CUB_NAMESPACE_BEGIN
 
-namespace detail::scan
+namespace detail
 {
 // Squad - device squad instance
 //
@@ -145,6 +145,6 @@ squadDispatch(SpecialRegisters sr, const SquadDesc (&squads)[numSquads], F f, in
     }
   }
 }
-} // namespace detail::scan
+} // namespace detail
 
 CUB_NAMESPACE_END

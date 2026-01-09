@@ -12,10 +12,10 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/device/dispatch/kernels/warpspeed/allocators/SmemAllocator.h>
-#include <cub/device/dispatch/kernels/warpspeed/constantAssert.h>
-#include <cub/device/dispatch/kernels/warpspeed/squad/SquadDesc.h>
-#include <cub/device/dispatch/kernels/warpspeed/SyncHandler.h>
+#include <cub/detail/warpspeed/allocators/smem_allocator.h>
+#include <cub/detail/warpspeed/constant_assert.h>
+#include <cub/detail/warpspeed/squad/squad_desc.h>
+#include <cub/detail/warpspeed/sync_handler.h>
 
 #include <cuda/__ptx/instructions/fence.h>
 #include <cuda/__ptx/instructions/mbarrier_arrive.h>
@@ -26,7 +26,7 @@
 
 CUB_NAMESPACE_BEGIN
 
-namespace detail::scan
+namespace detail
 {
 struct SmemResourceRaw
 {
@@ -173,6 +173,6 @@ struct SmemResourceRaw
     }
   }
 };
-} // namespace detail::scan
+} // namespace detail
 
 CUB_NAMESPACE_END

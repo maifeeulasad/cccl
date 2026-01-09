@@ -12,7 +12,7 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/device/dispatch/kernels/warpspeed/optimizeSmemPtr.cuh>
+#include <cub/detail/warpspeed/optimize_smem_ptr.cuh>
 
 #include <cuda/std/__type_traits/is_constant_evaluated.h>
 #include <cuda/std/cstdint>
@@ -21,7 +21,7 @@
 
 CUB_NAMESPACE_BEGIN
 
-namespace detail::scan
+namespace detail
 {
 struct SmemAllocator
 {
@@ -78,6 +78,6 @@ struct SmemAllocator
     return mAllocatedSize;
   }
 };
-} // namespace detail::scan
+} // namespace detail
 
 CUB_NAMESPACE_END

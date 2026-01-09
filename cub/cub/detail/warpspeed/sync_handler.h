@@ -12,8 +12,8 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/device/dispatch/kernels/warpspeed/constantAssert.h> // constantAssert
-#include <cub/device/dispatch/kernels/warpspeed/SpecialRegisters.cuh> // SpecialRegisters
+#include <cub/detail/warpspeed/constant_assert.h>
+#include <cub/detail/warpspeed/special_registers.cuh>
 
 #include <cuda/__ptx/instructions/elect_sync.h>
 #include <cuda/__ptx/instructions/mbarrier_init.h>
@@ -23,7 +23,7 @@
 
 CUB_NAMESPACE_BEGIN
 
-namespace detail::scan
+namespace detail
 {
 // SkipSync is a tag type that is used to indicate that a SyncHandler.blockInit
 // should forgo syncing.
@@ -145,6 +145,6 @@ struct SyncHandler
                  }))
   }
 };
-} // namespace detail::scan
+} // namespace detail
 
 CUB_NAMESPACE_END

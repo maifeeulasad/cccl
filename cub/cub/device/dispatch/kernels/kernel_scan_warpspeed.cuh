@@ -13,13 +13,14 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/device/dispatch/kernels/warpspeed/allocators/SmemAllocator.h>
-#include <cub/device/dispatch/kernels/warpspeed/look_ahead.h>
-#include <cub/device/dispatch/kernels/warpspeed/resource/SmemRef.cuh>
-#include <cub/device/dispatch/kernels/warpspeed/resource/SmemResource.cuh>
-#include <cub/device/dispatch/kernels/warpspeed/SpecialRegisters.cuh>
-#include <cub/device/dispatch/kernels/warpspeed/squad/Squad.h>
-#include <cub/device/dispatch/kernels/warpspeed/values.h>
+#include <cub/detail/warpspeed/allocators/smem_allocator.h>
+#include <cub/detail/warpspeed/look_ahead.h>
+#include <cub/detail/warpspeed/resource/smem_ref.cuh>
+#include <cub/detail/warpspeed/resource/smem_resource.cuh>
+#include <cub/detail/warpspeed/special_registers.cuh>
+#include <cub/detail/warpspeed/squad/load_store.h>
+#include <cub/detail/warpspeed/squad/squad.h>
+#include <cub/detail/warpspeed/values.h>
 #include <cub/thread/thread_reduce.cuh>
 #include <cub/thread/thread_scan.cuh>
 #include <cub/warp/warp_reduce.cuh>
@@ -28,7 +29,7 @@
 #include <cuda/__cmath/ceil_div.h>
 #include <cuda/__memory/align_down.h>
 #include <cuda/__memory/align_up.h>
-#include <cuda/ptx>
+#include <cuda/__ptx/instructions/clusterlaunchcontrol.h>
 #include <cuda/std/__algorithm/clamp.h>
 #include <cuda/std/__cccl/cuda_capabilities.h>
 #include <cuda/std/__type_traits/is_same.h>
@@ -52,11 +53,14 @@ struct scanKernelParams
 template <typename WarpspeedPolicy, typename InputT, typename OutputT, typename AccumT>
 struct ScanResources
 {
+  // Handle unaligned loads. We have at least 16 extra bytes of padding in every stage for squadLoadBulk.
+  static constexpr size_t input_tile_size  = WarpspeedPolicy::tile_size + ::cuda::ceil_div(16, sizeof(InputT));
+  static constexpr size_t output_tile_size = input_tile_size * sizeof(InputT) / sizeof(OutputT);
+
   union InOutT
   {
-    // Handle unaligned loads. We have at least 16 extra bytes of padding in every stage for squadLoadBulk.
-    InputT in[WarpspeedPolicy::tile_size + ::cuda::ceil_div(16, sizeof(InputT))];
-    OutputT out[sizeof(in) / sizeof(OutputT)];
+    InputT in[input_tile_size];
+    OutputT out[output_tile_size];
   };
   static_assert(alignof(InOutT) >= alignof(InputT));
   static_assert(alignof(InOutT) >= alignof(OutputT));
@@ -131,225 +135,6 @@ _CCCL_DEVICE_API inline void squadGetNextBlockIdx(const Squad& squad, SmemRef<ui
   refDestSmem.squadIncreaseTxCount(squad, refDestSmem.sizeBytes());
 }
 
-struct CpAsyncOobInfo
-{
-  char* ptrGmem;
-  char* ptrGmemStartAlignDown;
-  char* ptrGmemStartAlignUp;
-  char* ptrGmemEnd;
-  char* ptrGmemEndAlignDown;
-  char* ptrGmemEndAlignUp;
-  uint32_t overCopySizeBytes;
-  uint32_t underCopySizeBytes;
-  uint32_t origCopySizeBytes;
-  uint32_t smemStartOffsetElem;
-  uint32_t smemStartOffsetBytes;
-  uint32_t smemEndOffsetElem;
-  uint32_t smemEndOffsetBytes;
-};
-
-template <typename Tp>
-_CCCL_DEVICE_API inline CpAsyncOobInfo prepareCpAsyncOob(const Tp* ptrGmem, uint32_t sizeElem)
-{
-  // We will copy from [ptrGmemBase, ptrGmemEnd). Both pointers have to be 16B
-  // aligned.
-  const Tp* ptrGmemStartAlignDown = cuda::align_down(ptrGmem, ::cuda::std::size_t(16));
-  const Tp* ptrGmemStartAlignUp   = cuda::align_up(ptrGmem, ::cuda::std::size_t(16));
-  const Tp* ptrGmemEnd            = ptrGmem + sizeElem;
-  const Tp* ptrGmemEndAlignUp     = cuda::align_up(ptrGmemEnd, ::cuda::std::size_t(16));
-  const Tp* ptrGmemEndAlignDown   = cuda::align_down(ptrGmemEnd, ::cuda::std::size_t(16));
-
-  // Compute the final copy size in bytes. It can be either sizeElem or sizeElem + 16 / sizeof(T).
-  uint32_t origCopySizeBytes  = static_cast<uint32_t>(sizeof(Tp) * sizeElem);
-  uint32_t overCopySizeBytes  = static_cast<uint32_t>(sizeof(Tp) * (ptrGmemEndAlignUp - ptrGmemStartAlignDown));
-  uint32_t underCopySizeBytes = static_cast<uint32_t>(sizeof(Tp) * (ptrGmemEndAlignDown - ptrGmemStartAlignUp));
-  if (origCopySizeBytes < underCopySizeBytes)
-  {
-    // If ptrGmemStart and ptrGmemEnd are aligned to [1, .., 15] bytes, then
-    // when we align the one up and the other down we get overflow. We check for
-    // that here. In that case, the undercopy size is zero.
-    underCopySizeBytes = 0;
-  }
-  // The offset in elements to the first valid element in shared memory.
-  // ptrSmem + smemOffsetElem will point to the element copied from ptrGmem.
-  uint32_t smemStartOffsetElem = static_cast<uint32_t>(ptrGmem - ptrGmemStartAlignDown);
-  // The offset in elements between ptrGmemEnd and ptrGmemEndAlignDown
-  uint32_t smemEndOffsetElem = static_cast<uint32_t>(ptrGmemEnd - ptrGmemEndAlignDown);
-
-  return CpAsyncOobInfo{
-    .ptrGmem               = (char*) ptrGmem,
-    .ptrGmemStartAlignDown = (char*) ptrGmemStartAlignDown,
-    .ptrGmemStartAlignUp   = (char*) ptrGmemStartAlignUp,
-    .ptrGmemEnd            = (char*) ptrGmemEnd,
-    .ptrGmemEndAlignDown   = (char*) ptrGmemEndAlignDown,
-    .ptrGmemEndAlignUp     = (char*) ptrGmemEndAlignUp,
-    .overCopySizeBytes     = overCopySizeBytes,
-    .underCopySizeBytes    = underCopySizeBytes,
-    .origCopySizeBytes     = static_cast<uint32_t>(sizeof(Tp) * sizeElem),
-    .smemStartOffsetElem   = smemStartOffsetElem,
-    .smemStartOffsetBytes  = static_cast<uint32_t>(sizeof(Tp) * smemStartOffsetElem),
-    .smemEndOffsetElem     = smemEndOffsetElem,
-    .smemEndOffsetBytes    = static_cast<uint32_t>(sizeof(Tp) * smemEndOffsetElem),
-  };
-}
-
-template <typename Tp>
-_CCCL_DEVICE_API inline void squadLoadBulk(const Squad& squad, SmemRef<Tp>& refDestSmem, CpAsyncOobInfo cpAsyncOobInfo)
-{
-  void* ptrSmem    = refDestSmem.data().in;
-  uint64_t* ptrBar = refDestSmem.ptrCurBarrierRelease();
-
-  if (squad.isLeaderThread())
-  {
-    ::cuda::ptx::cp_async_bulk(
-      ::cuda::ptx::space_cluster,
-      ::cuda::ptx::space_global,
-      ptrSmem,
-      cpAsyncOobInfo.ptrGmemStartAlignDown,
-      cpAsyncOobInfo.overCopySizeBytes,
-      ptrBar);
-  }
-  refDestSmem.squadIncreaseTxCount(squad, cpAsyncOobInfo.overCopySizeBytes);
-}
-
-template <typename OutputT>
-_CCCL_DEVICE_API inline void squadStoreBulkSync(const Squad& squad, CpAsyncOobInfo cpAsyncOobInfo, OutputT* srcSmem)
-{
-  // This function performs either 1 copy, or three copies, depending on the
-  // size and alignment of the output tile in global memory.
-  //
-  // If the output tile is contained in a single 16-byte aligned region, then we
-  // only perform a single masked copy.
-  //
-  // If the output tile is larger or straddles two 16-byte aligned regions, then
-  // we perform up to three copies:
-  // - One copy for the first up to 15 bytes at the start of the region.
-  // - One copy that starts at a 16-byte aligned address and ends at the latest 16-byte aligned address.
-  // - One copy that cleans up the last up to 15 bytes.
-  if (squad.isLeaderWarp())
-  {
-    // Acquire shared memory in async proxy
-    // Perform fence.proxy.async with full warp to avoid BSSY+BSYNC
-    ::cuda::ptx::fence_proxy_async(::cuda::ptx::space_shared);
-
-    bool doStartCopy  = cpAsyncOobInfo.smemStartOffsetBytes > 0;
-    bool doEndCopy    = cpAsyncOobInfo.smemEndOffsetBytes > 0;
-    bool doMiddleCopy = cpAsyncOobInfo.ptrGmemStartAlignUp != cpAsyncOobInfo.ptrGmemEndAlignUp;
-
-    uint16_t byteMask      = 0xFFFF;
-    uint16_t byteMaskStart = byteMask << cpAsyncOobInfo.smemStartOffsetBytes;
-    uint16_t byteMaskEnd   = byteMask >> (16 - cpAsyncOobInfo.smemEndOffsetBytes);
-    // byteMaskStart contains zeroes at the left.
-    uint16_t byteMaskSmall =
-      byteMaskStart & (byteMask >> (16 - (cpAsyncOobInfo.ptrGmemEnd - cpAsyncOobInfo.ptrGmemStartAlignDown)));
-
-    char* ptrSmemMiddle = (char*) srcSmem;
-    if (doStartCopy)
-    {
-      ptrSmemMiddle += 16;
-    }
-
-    if (doMiddleCopy)
-    {
-      // Copy the middle part. Starting at byte 0 or 16 in shared memory. This
-      // is the large copy. We perform this one first, so that the compiler can
-      // (hopefully) hide all the arithmetic behind this instruction.
-      if (::cuda::ptx::elect_sync(~0))
-      {
-        ::cuda::ptx::cp_async_bulk(
-          ::cuda::ptx::space_global,
-          ::cuda::ptx::space_shared,
-          cpAsyncOobInfo.ptrGmemStartAlignUp,
-          ptrSmemMiddle,
-          cpAsyncOobInfo.underCopySizeBytes);
-      }
-      if (doStartCopy)
-      {
-        // Copy a subset of the first 16 bytes
-        if (::cuda::ptx::elect_sync(~0))
-        {
-          ::cuda::ptx::cp_async_bulk_cp_mask(
-            ::cuda::ptx::space_global,
-            ::cuda::ptx::space_shared,
-            cpAsyncOobInfo.ptrGmemStartAlignDown,
-            srcSmem,
-            /*size*/ 16,
-            byteMaskStart);
-        }
-      }
-      if (doEndCopy)
-      {
-        // Copy a subset of the last 16 bytes
-        if (::cuda::ptx::elect_sync(~0))
-        {
-          ::cuda::ptx::cp_async_bulk_cp_mask(
-            ::cuda::ptx::space_global,
-            ::cuda::ptx::space_shared,
-            ((char*) cpAsyncOobInfo.ptrGmemStartAlignUp) + cpAsyncOobInfo.underCopySizeBytes,
-            ptrSmemMiddle + cpAsyncOobInfo.underCopySizeBytes,
-            /*size*/ 16,
-            byteMaskEnd);
-        }
-      }
-    }
-    else
-    {
-      // Copy a subset of the first 16 bytes
-      if (::cuda::ptx::elect_sync(~0))
-      {
-        ::cuda::ptx::cp_async_bulk_cp_mask(
-          ::cuda::ptx::space_global,
-          ::cuda::ptx::space_shared,
-          cpAsyncOobInfo.ptrGmemStartAlignDown,
-          srcSmem,
-          /*size*/ 16,
-          byteMaskSmall);
-      }
-    }
-    // Commit and wait for store to have completed reading from shared memory
-    ::cuda::ptx::cp_async_bulk_commit_group();
-    ::cuda::ptx::cp_async_bulk_wait_group_read(::cuda::ptx::n32_t<0>{});
-  }
-}
-
-template <typename InputT, typename AccumT, int elemPerThread>
-_CCCL_DEVICE_API inline void squadLoadSmem(Squad squad, AccumT (&outReg)[elemPerThread], const InputT* smemBuf)
-{
-  for (int i = 0; i < elemPerThread; ++i)
-  {
-    outReg[i] = smemBuf[squad.threadRank() * elemPerThread + i];
-  }
-}
-
-template <typename OutputT, typename AccumT, int elemPerThread>
-_CCCL_DEVICE_API inline void squadStoreSmem(Squad squad, OutputT* smemBuf, const AccumT (&inReg)[elemPerThread])
-{
-  for (int i = 0; i < elemPerThread; ++i)
-  {
-    smemBuf[squad.threadRank() * elemPerThread + i] = static_cast<OutputT>(inReg[i]);
-  }
-}
-
-template <typename OutputT, typename AccumT, int elemPerThread>
-_CCCL_DEVICE_API inline void
-squadStoreSmemPartial(Squad squad, OutputT* smemBuf, const AccumT (&inReg)[elemPerThread], int beginIndex, int endIndex)
-{
-  for (int i = 0; i < elemPerThread; ++i)
-  {
-    const int elem_idx = squad.threadRank() * elemPerThread + i;
-    if (beginIndex <= elem_idx && elem_idx < endIndex)
-    {
-      smemBuf[elem_idx - beginIndex] = static_cast<OutputT>(inReg[i]);
-    }
-  }
-}
-
-template <typename Tp, int elemPerThread, typename ScanOpT>
-_CCCL_DEVICE_API inline Tp threadReduce(const Tp (&regInput)[elemPerThread], ScanOpT& scan_op)
-{
-  return ThreadReduce(regInput, scan_op);
-}
-
 template <typename Tp, typename ScanOpT>
 _CCCL_DEVICE_API inline Tp warpReduce(const Tp input, ScanOpT& scan_op)
 {
@@ -392,14 +177,6 @@ _CCCL_DEVICE_API inline Tp warpScanExclusive(const Tp regInput, ScanOpT& scan_op
 
   return result;
 }
-
-template <int elemPerThread, typename AccumT, typename ScanOpT>
-_CCCL_DEVICE_API inline void threadScanInclusive(AccumT (&regArray)[elemPerThread], ScanOpT& scan_op)
-{
-  detail::ThreadScanInclusive(regArray, regArray, scan_op);
-}
-
-namespace ptx = cuda::ptx;
 
 // The kernelBody device function is a straight-line implementation of the
 // warp-specialized kernel.
@@ -561,7 +338,7 @@ _CCCL_DEVICE_API _CCCL_FORCEINLINE void kernelBody(
         }
         else
         {
-          regThreadSum = threadReduce(regInput, scan_op);
+          regThreadSum = ThreadReduce(regInput, scan_op);
           regWarpSum   = warpReduce(regThreadSum, scan_op);
         }
       }
@@ -830,10 +607,11 @@ _CCCL_DEVICE_API _CCCL_FORCEINLINE void kernelBody(
       {
         // otherwise, issue multiple bulk copies in chunks of the input tile size
         // TODO(bgruber): I am sure this could be implemented a lot more efficiently
-        const int elem_per_chunk = ::cuda::std::size(refInOutRW.data().out);
-        for (int chunk_offset = 0; chunk_offset < static_cast<int>(valid_items); chunk_offset += elem_per_chunk)
+        static constexpr int elem_per_chunk =
+          static_cast<int>(ScanResources<WarpspeedPolicy, InputT, OutputT, AccumT>::output_tile_size);
+        for (int chunk_offset = 0; chunk_offset < valid_items; chunk_offset += elem_per_chunk)
         {
-          const int chunk_size     = ::cuda::std::min(static_cast<int>(valid_items) - chunk_offset, elem_per_chunk);
+          const int chunk_size     = ::cuda::std::min(valid_items - chunk_offset, elem_per_chunk);
           CpAsyncOobInfo storeInfo = prepareCpAsyncOob(params.ptrOut + idxTileBase + chunk_offset, chunk_size);
           OutputT* smemBuf         = smem_output_tile + storeInfo.smemStartOffsetElem;
 

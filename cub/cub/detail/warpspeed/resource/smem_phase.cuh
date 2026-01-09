@@ -12,14 +12,14 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/device/dispatch/kernels/warpspeed/resource/SmemRef.cuh>
-#include <cub/device/dispatch/kernels/warpspeed/resource/SmemResourceRaw.cuh>
+#include <cub/detail/warpspeed/resource/smem_ref.cuh>
+#include <cub/detail/warpspeed/resource/smem_resource_raw.cuh>
 
 #include <cuda/std/cstdint>
 
 CUB_NAMESPACE_BEGIN
 
-namespace detail::scan
+namespace detail
 {
 template <typename _Tp>
 struct SmemPhase
@@ -40,6 +40,6 @@ struct SmemPhase
     return SmemRef<_Tp>(mSmemResourceRaw, mCurPhase);
   }
 };
-} // namespace detail::scan
+} // namespace detail
 
 CUB_NAMESPACE_END

@@ -12,14 +12,14 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/device/dispatch/kernels/warpspeed/makeWarpUniform.cuh> // makeWarpUniform.cuh
+#include <cub/detail/warpspeed/make_warp_uniform.cuh>
 
 #include <cuda/__ptx/instructions/get_sreg.h>
-#include <cuda/std/cstdint> // uint32_t
+#include <cuda/std/cstdint>
 
 CUB_NAMESPACE_BEGIN
 
-namespace detail::scan
+namespace detail
 {
 // Commonly used special registers that we should cache in registers or uniform
 // registers.
@@ -39,6 +39,6 @@ struct SpecialRegisters
   uint32_t warpIdx        = makeWarpUniform(threadIdxX / 32);
   return {clusterCtaRank, blockIdx.x, threadIdxX, warpIdx, ::cuda::ptx::get_sreg_laneid()};
 }
-} // namespace detail::scan
+} // namespace detail
 
 CUB_NAMESPACE_END

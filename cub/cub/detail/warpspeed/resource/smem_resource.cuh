@@ -12,18 +12,18 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/device/dispatch/kernels/warpspeed/allocators/SmemAllocator.h>
-#include <cub/device/dispatch/kernels/warpspeed/resource/SmemResourceRaw.cuh>
-#include <cub/device/dispatch/kernels/warpspeed/resource/SmemStage.cuh>
-#include <cub/device/dispatch/kernels/warpspeed/SyncHandler.h>
-#include <cub/device/dispatch/kernels/warpspeed/values.h>
+#include <cub/detail/warpspeed/allocators/smem_allocator.h>
+#include <cub/detail/warpspeed/resource/smem_resource_raw.cuh>
+#include <cub/detail/warpspeed/resource/smem_stage.cuh>
+#include <cub/detail/warpspeed/sync_handler.h>
+#include <cub/detail/warpspeed/values.h>
 
 #include <cuda/std/__utility/to_underlying.h>
 #include <cuda/std/cstdint>
 
 CUB_NAMESPACE_BEGIN
 
-namespace detail::scan
+namespace detail
 {
 template <typename _Tp>
 struct SmemResource : SmemResourceRaw
@@ -55,6 +55,6 @@ private:
     return SmemResourceRaw(syncHandler, ptrBase, sizeBytes, strideBytes, ::cuda::std::to_underlying(stages));
   }
 };
-} // namespace detail::scan
+} // namespace detail
 
 CUB_NAMESPACE_END
