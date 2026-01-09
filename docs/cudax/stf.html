@@ -3169,6 +3169,7 @@ in existing code.</p>
 the application take care of synchronization.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">Tokens</span></code> make it possible to enforce concurrent execution while
 letting the application manage data allocations and data transfers.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Execution</span> <span class="pre">places</span></code> can be used without tasks for example to automate the management of CUDA streams, or set the current execution context.</p></li>
 </ul>
 <section id="freezing-logical-data">
 <h3>Freezing logical data<a class="headerlink" href="#freezing-logical-data" title="Link to this heading">#</a></h3>
@@ -3271,6 +3272,128 @@ or an <code class="docutils literal notranslate"><span class="pre">rw()</span></
 <p>A token corresponds to a <code class="docutils literal notranslate"><span class="pre">logical_data&lt;void_interface&gt;</span></code> object, so that the
 <code class="docutils literal notranslate"><span class="pre">token</span></code> type serves as a short-hand for this type. <code class="docutils literal notranslate"><span class="pre">ctx.token()</span></code> thus
 returns an object with a <code class="docutils literal notranslate"><span class="pre">token</span></code> type.</p>
+</section>
+<section id="stream-management-with-execution-places">
+<h3>Stream management with execution places<a class="headerlink" href="#stream-management-with-execution-places" title="Link to this heading">#</a></h3>
+<p>CUDASTF’s execution places can be used independently of the task system to
+manage CUDA streams in a structured way. This is useful when you want to use
+CUDASTF’s place abstractions (devices, green contexts) for stream management
+without the full task-based programming model.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">exec_place::pick_stream</span></code> method returns a CUDA stream from the stream
+pool associated with a specific execution place. To use this facility, you need
+an <code class="docutils literal notranslate"><span class="pre">async_resources_handle</span></code> object, which manages the underlying stream pools.</p>
+<p>The method accepts an optional <code class="docutils literal notranslate"><span class="pre">for_computation</span></code> hint (defaults to <code class="docutils literal notranslate"><span class="pre">true</span></code>)
+that may select between computation and data transfer stream pools to improve
+overlapping. This is purely a performance hint, and it does not affect correctness. Not all execution places enforce
+it.</p>
+<p><strong>Using execution places without a context:</strong></p>
+<p>When using execution places without a CUDASTF context, create a standalone
+<code class="docutils literal notranslate"><span class="pre">async_resources_handle</span></code>:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;cuda/experimental/stf.cuh&gt;</span>
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">cuda</span><span class="o">::</span><span class="nn">experimental</span><span class="o">::</span><span class="nn">stf</span><span class="p">;</span>
+
+<span class="c1">// Create an async_resources_handle (manages stream pools)</span>
+<span class="n">async_resources_handle</span><span class="w"> </span><span class="n">resources</span><span class="p">;</span>
+
+<span class="c1">// Get a stream from the current device</span>
+<span class="n">exec_place</span><span class="w"> </span><span class="n">place</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">exec_place</span><span class="o">::</span><span class="n">current_device</span><span class="p">();</span>
+<span class="n">cudaStream_t</span><span class="w"> </span><span class="n">stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">place</span><span class="p">.</span><span class="n">pick_stream</span><span class="p">(</span><span class="n">resources</span><span class="p">);</span>
+
+<span class="c1">// Use the stream for CUDA operations</span>
+<span class="n">myKernel</span><span class="o">&lt;&lt;&lt;</span><span class="n">grid</span><span class="p">,</span><span class="w"> </span><span class="n">block</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">stream</span><span class="o">&gt;&gt;&gt;</span><span class="p">(</span><span class="n">d_data</span><span class="p">);</span>
+
+<span class="c1">// Get streams from specific devices</span>
+<span class="n">cudaStream_t</span><span class="w"> </span><span class="n">stream_dev0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">exec_place</span><span class="o">::</span><span class="n">device</span><span class="p">(</span><span class="mi">0</span><span class="p">).</span><span class="n">pick_stream</span><span class="p">(</span><span class="n">resources</span><span class="p">);</span>
+<span class="n">cudaStream_t</span><span class="w"> </span><span class="n">stream_dev1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">exec_place</span><span class="o">::</span><span class="n">device</span><span class="p">(</span><span class="mi">1</span><span class="p">).</span><span class="n">pick_stream</span><span class="p">(</span><span class="n">resources</span><span class="p">);</span>
+</pre></div>
+</div>
+<p>Stream pools are populated lazily—CUDA streams are only created when first
+requested via <code class="docutils literal notranslate"><span class="pre">pick_stream()</span></code>.</p>
+<p><strong>Using execution places alongside a context:</strong></p>
+<p>When working alongside a CUDASTF context, use <code class="docutils literal notranslate"><span class="pre">ctx.async_resources()</span></code> to
+ensure the same stream pools are shared between your code and the context’s
+internal operations:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="n">stream_ctx</span><span class="w"> </span><span class="n">ctx</span><span class="p">;</span>
+
+<span class="c1">// Get a stream using the context&#39;s async_resources</span>
+<span class="n">exec_place</span><span class="w"> </span><span class="n">place</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">exec_place</span><span class="o">::</span><span class="n">device</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+<span class="n">cudaStream_t</span><span class="w"> </span><span class="n">stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">place</span><span class="p">.</span><span class="n">pick_stream</span><span class="p">(</span><span class="n">ctx</span><span class="p">.</span><span class="n">async_resources</span><span class="p">());</span>
+
+<span class="c1">// This stream comes from the same pool used by the context internally.</span>
+<span class="c1">// ctx.pick_stream() is a shorthand that uses the default execution place</span>
+<span class="c1">// for the calling thread.</span>
+<span class="n">cudaStream_t</span><span class="w"> </span><span class="n">ctx_stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ctx</span><span class="p">.</span><span class="n">pick_stream</span><span class="p">();</span>
+
+<span class="n">ctx</span><span class="p">.</span><span class="n">finalize</span><span class="p">();</span>
+</pre></div>
+</div>
+<p><strong>Getting multiple streams:</strong></p>
+<p>You can query the pool size and retrieve all streams as a vector:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="n">async_resources_handle</span><span class="w"> </span><span class="n">resources</span><span class="p">;</span>
+<span class="n">exec_place</span><span class="w"> </span><span class="n">place</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">exec_place</span><span class="o">::</span><span class="n">current_device</span><span class="p">();</span>
+
+<span class="c1">// Query the number of streams in the pool</span>
+<span class="kt">size_t</span><span class="w"> </span><span class="n">pool_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">place</span><span class="p">.</span><span class="n">stream_pool_size</span><span class="p">(</span><span class="n">resources</span><span class="p">);</span>
+
+<span class="c1">// Get all streams from the pool as a vector</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">cudaStream_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">streams</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">place</span><span class="p">.</span><span class="n">pick_all_streams</span><span class="p">(</span><span class="n">resources</span><span class="p">);</span>
+
+<span class="c1">// Use the streams for concurrent operations</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">streams</span><span class="p">.</span><span class="n">size</span><span class="p">();</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">myKernel</span><span class="o">&lt;&lt;&lt;</span><span class="n">grid</span><span class="p">,</span><span class="w"> </span><span class="n">block</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">streams</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">&gt;&gt;&gt;</span><span class="p">(</span><span class="n">d_data</span><span class="p">[</span><span class="n">i</span><span class="p">]);</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="setting-the-current-device-or-context">
+<h3>Setting the current device or context<a class="headerlink" href="#setting-the-current-device-or-context" title="Link to this heading">#</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">exec_place::activate()</span></code> method provides a generic alternative to
+<code class="docutils literal notranslate"><span class="pre">cudaSetDevice()</span></code> that works uniformly across different execution place types.
+This is useful when you want to set the current CUDA device or context without
+using CUDASTF tasks.</p>
+<p>The method returns an <code class="docutils literal notranslate"><span class="pre">exec_place</span></code> representing the previous state, which can
+be used to restore the original device or context.</p>
+<p><strong>Behavior by execution place type:</strong></p>
+<ul class="simple">
+<li><p><strong>Device places</strong> (<code class="docutils literal notranslate"><span class="pre">exec_place::device(id)</span></code>): Calls <code class="docutils literal notranslate"><span class="pre">cudaSetDevice(id)</span></code></p></li>
+<li><p><strong>Green context places</strong>: Sets the current CUDA driver context via <code class="docutils literal notranslate"><span class="pre">cuCtxSetCurrent()</span></code></p></li>
+<li><p><strong>Host places</strong>: No-op</p></li>
+</ul>
+<p><strong>Basic usage with devices:</strong></p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="n">exec_place</span><span class="w"> </span><span class="n">place</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">exec_place</span><span class="o">::</span><span class="n">device</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+<span class="n">exec_place</span><span class="w"> </span><span class="n">prev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">place</span><span class="p">.</span><span class="n">activate</span><span class="p">();</span><span class="w">  </span><span class="c1">// Switch to device 1</span>
+
+<span class="c1">// ... perform operations on device 1 ...</span>
+
+<span class="n">place</span><span class="p">.</span><span class="n">deactivate</span><span class="p">(</span><span class="n">prev</span><span class="p">);</span><span class="w">  </span><span class="c1">// Restore previous device</span>
+</pre></div>
+</div>
+<p><strong>Alternative restoration pattern:</strong></p>
+<p>You can also restore by calling <code class="docutils literal notranslate"><span class="pre">activate()</span></code> on the returned place:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="n">exec_place</span><span class="w"> </span><span class="n">place</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">exec_place</span><span class="o">::</span><span class="n">device</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+<span class="n">exec_place</span><span class="w"> </span><span class="n">prev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">place</span><span class="p">.</span><span class="n">activate</span><span class="p">();</span>
+
+<span class="c1">// ... work on device 1 ...</span>
+
+<span class="n">prev</span><span class="p">.</span><span class="n">activate</span><span class="p">();</span><span class="w">  </span><span class="c1">// Equivalent to place.deactivate(prev)</span>
+</pre></div>
+</div>
+<p><strong>Usage with green contexts (CUDA 12.4+):</strong></p>
+<p>Green contexts provide SM-level partitioning of GPU resources. The
+<code class="docutils literal notranslate"><span class="pre">activate()</span></code>/<code class="docutils literal notranslate"><span class="pre">deactivate()</span></code> methods handle the underlying driver context
+management:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// Create green contexts with 8 SMs each</span>
+<span class="n">green_context_helper</span><span class="w"> </span><span class="nf">gc</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">device_id</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">view</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gc</span><span class="p">.</span><span class="n">get_view</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+
+<span class="n">exec_place</span><span class="w"> </span><span class="n">gc_place</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">exec_place</span><span class="o">::</span><span class="n">green_ctx</span><span class="p">(</span><span class="n">view</span><span class="p">);</span>
+<span class="n">exec_place</span><span class="w"> </span><span class="n">prev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gc_place</span><span class="p">.</span><span class="n">activate</span><span class="p">();</span><span class="w">  </span><span class="c1">// Sets green context as current</span>
+
+<span class="c1">// ... GPU work runs with SM affinity ...</span>
+
+<span class="n">gc_place</span><span class="p">.</span><span class="n">deactivate</span><span class="p">(</span><span class="n">prev</span><span class="p">);</span><span class="w">  </span><span class="c1">// Restore original context</span>
+</pre></div>
+</div>
 </section>
 </section>
 <section id="debugging">
@@ -3854,6 +3977,8 @@ symbols set in the tasks of the miniWeather examples : <img alt="image1" src="..
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#modular-use-of-cudastf">Modular use of CUDASTF</a><ul class="visible nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#freezing-logical-data">Freezing logical data</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tokens">Tokens</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#stream-management-with-execution-places">Stream management with execution places</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#setting-the-current-device-or-context">Setting the current device or context</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#debugging">Debugging</a><ul class="visible nav section-nav flex-column">
