@@ -34,7 +34,8 @@ __host__ __device__ constexpr void test()
   { // 1d mdspan
     // ['H', 'O', 'P', 'P', 'E', 'R']
     cuda::std::dims<1> extent{6};
-    cuda::std::mdspan md{data, cuda::std::layout_left::mapping{extent}};
+    cuda::std::layout_left::mapping mapping{extent};
+    cuda::std::mdspan md{data, mapping};
     static_assert(md.rank() == 1);
     static_assert(md.rank_dynamic() == 1);
     assert(equal_to(md, "HOPPER"));
@@ -101,7 +102,8 @@ __host__ __device__ constexpr void test()
     // ['H', 'P', 'E']
     // ['O', 'P', 'R']
     cuda::std::dims<2> extent{2, 3};
-    cuda::std::mdspan md{data, cuda::std::layout_left::mapping{extent}};
+    cuda::std::layout_left::mapping mapping{extent};
+    cuda::std::mdspan md{data, mapping};
     static_assert(md.rank() == 2);
     static_assert(md.rank_dynamic() == 2);
 
