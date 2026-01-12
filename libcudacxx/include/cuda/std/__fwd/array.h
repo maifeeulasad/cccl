@@ -29,8 +29,13 @@
 #if _CCCL_HAS_HOST_STD_LIB()
 _CCCL_BEGIN_NAMESPACE_STD
 
+#  if _CCCL_HOST_STD_LIB(STL)
+template <class _Tp, size_t _Size>
+class array;
+#  else // ^^^ _CCCL_HOST_STD_LIB(STL) ^^^ / vvv !_CCCL_HOST_STD_LIB(STL) vvv
 template <class _Tp, size_t _Size>
 struct array;
+#  endif // !_CCCL_HOST_STD_LIB(STL)
 
 _CCCL_END_NAMESPACE_STD
 #endif // _CCCL_HAS_HOST_STD_LIB()
