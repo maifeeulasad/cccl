@@ -49,6 +49,14 @@ _CCCL_API constexpr auto find_lowest_arch_with_same_policy(
   return all_arches[i];
 }
 
+#    if _CCCL_COMPILER(GCC, <, 8)
+template <typename T, typename... Ts>
+_CCCL_API constexpr auto make_array(T head, Ts... tail)
+{
+  return ::cuda::std::array<T, 1 + sizeof...(Ts)>{head, tail...};
+}
+#    endif // _CCCL_COMPILER(GCC, <, 8)
+
 template <int ArchMult, typename CudaArchSeq, typename PolicySelector, size_t... Is>
 struct lowest_arch_resolver;
 
@@ -62,7 +70,13 @@ struct lowest_arch_resolver<ArchMult, ::cuda::std::integer_sequence<int, CudaArc
   using policy_t = decltype(PolicySelector{}(::cuda::arch_id{}));
 
   static constexpr ::cuda::arch_id all_arches[sizeof...(Is)] = {::cuda::arch_id{(CudaArches * ArchMult) / 10}...};
-  static constexpr policy_t all_policies[sizeof...(Is)]      = {PolicySelector{}(all_arches[Is])...};
+
+#    if _CCCL_COMPILER(GCC, <, 8)
+  static constexpr ::cuda::std::array<policy_t, sizeof...(Is)> all_policies =
+    make_array(PolicySelector{}(all_arches[Is])...);
+#    else // _CCCL_COMPILER(GCC, <, 8)
+  static constexpr policy_t all_policies[sizeof...(Is)] = {PolicySelector{}(all_arches[Is])...};
+#    endif // _CCCL_COMPILER(GCC, <, 8)
 
   _CCCL_API static constexpr auto find_lowest(size_t i) -> ::cuda::arch_id
   {
