@@ -99,7 +99,35 @@ public:
 
   _CCCL_HOST_DEVICE void deallocate(pointer p, size_type n) noexcept
   {
-    return thrust::return_temporary_buffer(system(), p, n);
+#if _CCCL_CUDA_COMPILATION()
+    NV_IF_TARGET(
+      NV_IS_HOST,
+      (
+        // On host: catch any exceptions from return_temporary_buffer to maintain noexcept contract
+        try { thrust::return_temporary_buffer(system(), p, n); } catch (...) {
+          // Swallow all exceptions to maintain noexcept contract per C++ allocator requirements.
+          // [allocator.traits.members#5] Deallocate must be noexcept to be safe in destructors
+          // and during exception unwinding. Clear CUDA error state and leak the memory rather
+          // than propagating exception.
+          cudaGetLastError();
+          // Memory is leaked, but this matches standard allocator behavior when deallocation fails.
+        }),
+      ( // NV_IS_DEVICE
+        // On device: exceptions can't propagate anyway, just call directly
+        thrust::return_temporary_buffer(system(), p, n);));
+#else
+    // Host-only compilation: use try-catch
+    try
+    {
+      thrust::return_temporary_buffer(system(), p, n);
+    }
+    catch (...)
+    {
+      // Swallow all exceptions to maintain noexcept contract per C++ allocator requirements.
+      // Deallocate must be noexcept to be safe in destructors and during exception unwinding.
+      // Memory is leaked, but this matches standard allocator behavior when deallocation fails.
+    }
+#endif
   }
 
   _CCCL_HOST_DEVICE inline System& system()
