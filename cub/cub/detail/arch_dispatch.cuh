@@ -64,7 +64,6 @@ struct lowest_arch_resolver;
 template <int ArchMult, int... CudaArches, typename PolicySelector, size_t... Is>
 struct lowest_arch_resolver<ArchMult, ::cuda::std::integer_sequence<int, CudaArches...>, PolicySelector, Is...>
 {
-  static_assert(::cuda::std::is_empty_v<PolicySelector>);
   static_assert(sizeof...(CudaArches) == sizeof...(Is));
 
   using policy_t = decltype(PolicySelector{}(::cuda::arch_id{}));
@@ -141,6 +140,9 @@ template <typename PolicySelector, typename F>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t
 dispatch_arch(PolicySelector policy_selector, ::cuda::arch_id device_arch, F&& f)
 {
+  // when not using CCCL.C, policy_selector is empty since all information is contained in its type
+  static_assert(::cuda::std::is_empty_v<PolicySelector>);
+
   // if we have __CUDA_ARCH_LIST__ or NV_TARGET_SM_INTEGER_LIST, we only poll the policy hub for those arches.
 #  ifdef __CUDA_ARCH_LIST__
   [[maybe_unused]] static constexpr auto arch_seq = ::cuda::std::integer_sequence<int, __CUDA_ARCH_LIST__>{};
