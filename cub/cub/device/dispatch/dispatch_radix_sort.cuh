@@ -1157,7 +1157,12 @@ public:
       return __invoke_single_tile(kernel_source.RadixSortSingleTileKernel(), policy.single_tile);
     }
 
+#if _CCCL_COMPILER(GCC, <, 8)
+    // gcc 7 fails to use `policy` in a constant expression, so we just compute it again inplace
+    if CUB_DETAIL_CONSTEXPR_ISH (PolicyGetter{}().use_onesweep)
+#else // _CCCL_COMPILER(GCC, <, 8)
     if CUB_DETAIL_CONSTEXPR_ISH (policy.use_onesweep)
+#endif // _CCCL_COMPILER(GCC, <, 8)
     {
       return __invoke_onesweep(policy);
     }
